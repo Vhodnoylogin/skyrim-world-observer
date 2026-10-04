@@ -165,9 +165,11 @@ No contact is promoted to a final-solver or complete-manifold assertion.
 
 Immediate independent verification found zero mismatches across all 739
 recorded restoration paths and the private fixture pins. The temporary plugin
-was removed during restoration. A subsequent guardian interruption experiment
-with this final executor package is a separate runner qualification and is not
-claimed here until its result is recorded.
+was removed during restoration. Separate final-executor guardian experiment
+`20261004-233010-420ef0` intentionally terminated the runner after readiness.
+Its independent guardian recovered all 739 paths, including the staged observer;
+immediate independent comparison found no mismatches and preserved save pins.
+The expected failed scenario is recovery qualification, not another physics pass.
 
 This qualifies selected rigid-body state, body replacement and passive contact
 callbacks in one tested environment. Multi-part ragdolls, multiple worlds, live
