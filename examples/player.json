@@ -1,0 +1,8 @@
+{
+  "kind":"world_observer",
+  "refs":["0x14"],
+  "nodes":[
+    {"ref":"0x14","name":"NPC R Hand [RHnd]","firstPerson":true},
+    {"ref":"0x14","name":"NPC R Hand [RHnd]","firstPerson":false}
+  ]
+}

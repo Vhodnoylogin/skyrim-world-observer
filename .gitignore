@@ -1,0 +1,12 @@
+build/
+_deps/
+__pycache__/
+*.pyc
+*.dll
+*.lib
+*.obj
+*.pdb
+*.jsonl
+*.log
+*.zip
+.vs/

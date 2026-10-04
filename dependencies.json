@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "CommonLibSSE-NG": {
+    "repository": "https://github.com/CharmedBaryon/CommonLibSSE-NG.git",
+    "tag": "v3.7.0",
+    "commit": "c4ab853d095e81e3390b282d7ba01ab2f24ebf25",
+    "archiveUrl": "https://codeload.github.com/CharmedBaryon/CommonLibSSE-NG/tar.gz/c4ab853d095e81e3390b282d7ba01ab2f24ebf25",
+    "archiveSha256": "fd413a0a94bcabd33e9ae215b778a2d923ba18b69ecff2478acd769d433d5e65"
+  },
+  "fmt": {
+    "repository": "https://github.com/fmtlib/fmt.git",
+    "tag": "11.0.2",
+    "commit": "0c9fce2ffefecfdce794e1859584e25877b7b592",
+    "archiveUrl": "https://codeload.github.com/fmtlib/fmt/tar.gz/0c9fce2ffefecfdce794e1859584e25877b7b592",
+    "archiveSha256": "f94052c10b611fd374194ca6e0dc4d159459c0b370abfe9002c13058863b7039"
+  },
+  "spdlog": {
+    "repository": "https://github.com/gabime/spdlog.git",
+    "tag": "v1.15.0",
+    "commit": "8e5613379f5140fefb0b60412fbf1f5406e7c7f8",
+    "archiveUrl": "https://codeload.github.com/gabime/spdlog/tar.gz/8e5613379f5140fefb0b60412fbf1f5406e7c7f8",
+    "archiveSha256": "75d7faefdb365f69ec5129b966bc104da21456854751d8fbe08585099ac8a308"
+  },
+  "nlohmann_json": {
+    "repository": "https://github.com/nlohmann/json.git",
+    "tag": "v3.11.3",
+    "commit": "9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
+    "archiveUrl": "https://codeload.github.com/nlohmann/json/tar.gz/9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
+    "archiveSha256": "0dbc5e40a01ff142e7e68c03e85247a4dcede2f592d12d3677dee3664d17975a"
+  },
+  "rapidcsv": {
+    "repository": "https://github.com/d99kris/rapidcsv.git",
+    "tag": "v8.99",
+    "commit": "68f57cc6c83d5e0992904398822453489d8dfac1",
+    "archiveUrl": "https://codeload.github.com/d99kris/rapidcsv/tar.gz/68f57cc6c83d5e0992904398822453489d8dfac1",
+    "archiveSha256": "2489c5a9aea18427b5fdd356daff61518a10dcfc559e57c51e123158e45109df"
+  },
+  "DevBenchAPI": {
+    "repository": "https://github.com/alandtse/devbench",
+    "commit": "32823e465c18a676afc9048ac948aa22a616abd0",
+    "files": {
+      "DevBenchAPI.h": "dfe5f23d305b439853a5ae0392b39e0baae294eba5718b28d5a0fc65003bc440",
+      "DevBenchAPI.cpp": "05824b50e48310cc44f9d81585482aa0e413b030fb6086477a77f427d6ab183e",
+      "DevBenchAPI.LICENSE.txt": "678208fd4c5a5b64995f4b83f2fbb9cef9389c668503791d90d461784790df8a"
+    }
+  }
+}
