@@ -34,15 +34,33 @@ struct Request {
     std::vector<std::uint32_t> refs;
     std::vector<NodeRequest> nodes;
     int timeoutMs = 1500;
+    std::vector<std::uint32_t> physicsRefs;
+    std::uint64_t afterSequence = 0;
 };
 inline Request Parse(const json& args) {
     if (!args.is_object()) throw std::invalid_argument("request must be an object");
+    Request r;
     for (const auto& [key, unused] : args.items()) {
         (void)unused;
-        if (key != "kind" && key != "action" && key != "refs" && key != "nodes" && key != "timeoutMs")
+        if (key != "kind" && key != "action" && key != "refs" && key != "nodes" && key != "timeoutMs" && key != "physics")
             throw std::invalid_argument("unsupported request field: " + key);
     }
-    Request r;
+    if (args.contains("physics")) {
+        const auto& p=args["physics"];
+        if (!p.is_object() || !p.contains("refs") || !p["refs"].is_array() || p["refs"].empty() || p["refs"].size()>16)
+            throw std::invalid_argument("physics requires refs array of 1..16 FormIDs");
+        for (const auto& [key, unused]:p.items()) {
+            (void)unused;
+            if(key!="refs" && key!="afterSequence") throw std::invalid_argument("unsupported physics field");
+        }
+        for(const auto& ref:p["refs"]) r.physicsRefs.push_back(Form(ref));
+        if(p.contains("afterSequence")) {
+            const auto& n=p["afterSequence"];
+            if(!n.is_number_integer() || (!n.is_number_unsigned() && n.get<std::int64_t>()<0))
+                throw std::invalid_argument("afterSequence must be nonnegative uint64");
+            r.afterSequence=n.get<std::uint64_t>();
+        }
+    }
     if (args.contains("timeoutMs")) {
         if (!args["timeoutMs"].is_number_integer()) throw std::invalid_argument("timeoutMs must be integer");
         const auto& timeout=args["timeoutMs"];

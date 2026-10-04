@@ -1,4 +1,6 @@
 #include "Contract.h"
+#include "Physics.h"
+#include "Scene3D.h"
 #include "DevBenchAPI.h"
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
@@ -25,12 +27,13 @@ json Error(std::string reason, std::string outcome = "rejected") {
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.1.0"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.0"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},
-        {"domains",{{"references",true},{"nodes",true},{"physics",false},{"render",false}}},
+        {"domains",{{"references",true},{"nodes",true},{"physics",true},{"render",false}}},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
-        {"physicsReason","No physics-safe phase collector in 0.1.0"},
-        {"renderReason","No renderer provider in 0.1.0"}};
+        {"physics",{{"bodies",true},{"contactCallbacks",true},{"currentManifold",false},{"continuousContactCoverage",false},
+                    {"bounds",{{"refs",16},{"bodies",64},{"sceneNodes",128},{"contactRing",256},{"worldLifetimeSubscriptions",32},{"leaseMs",5000}}}}},
+        {"renderReason","No renderer provider"}};
 }
 json Vec(const RE::NiPoint3& v) { return json::array({v.x,v.y,v.z}); }
 json Transform(const RE::NiTransform& t) {
@@ -63,7 +66,7 @@ json ReadRef(std::uint32_t id, std::uint64_t gen) {
     out["baseForm"] = base ? json(Hex(base->GetFormID())) : json(nullptr);
     const auto cell = ref->GetParentCell();
     out["cellForm"] = cell ? json(Hex(cell->GetFormID())) : json(nullptr);
-    const auto root = ref->Get3D();
+    const auto root = observer::SceneRoot(ref);
     out["loaded3D"] = root != nullptr;
     out["sceneTransform"] = root ? Transform(root->world) : json(nullptr);
     if (!observer::Finite(out)) return {{"form",Hex(id)},{"status","unavailable"},{"reason","Non-finite reference transform"}};
@@ -74,7 +77,7 @@ json ReadNode(const observer::NodeRequest& request, std::uint64_t gen) {
     const auto ref = Ref(request.ref);
     if (!ref || ref->IsDeleted()) { out.update({{"status","unavailable"},{"reason","Reference missing or deleted"}}); return out; }
     out["identity"] = Identity(ref,gen);
-    const auto root = ref->Get3D(request.firstPerson);
+    const auto root = observer::SceneRoot(ref,request.firstPerson);
     if (!root) { out.update({{"status","unavailable"},{"reason","Requested 3D tree not loaded"}}); return out; }
     const auto node = root->GetObjectByName(RE::BSFixedString(request.name));
     if (!node) { out.update({{"status","unavailable"},{"reason","Node not found"}}); return out; }
@@ -92,7 +95,7 @@ json Frame() {
 }
 json Snapshot(const observer::Request& request, std::uint64_t gen) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.1.0"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.2.0"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",Frame()},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -103,6 +106,11 @@ json Snapshot(const observer::Request& request, std::uint64_t gen) {
     bool complete = true;
     for (auto id : request.refs) { auto value=ReadRef(id,gen); complete &= value["status"]=="available"; out["refs"].push_back(std::move(value)); }
     for (const auto& n : request.nodes) { auto value=ReadNode(n,gen); complete &= value["status"]=="available"; out["nodes"].push_back(std::move(value)); }
+    if(!request.physicsRefs.empty()) {
+        out["physics"]=observer::physics::Snapshot(request,gen,generation,loading);
+        complete &= out["physics"]["status"]=="available";
+        out["coherence"]["physics"]="separate_world_lock_and_asynchronous_contact_callbacks";
+    }
     out["quality"] = complete ? "complete" : "partial";
     out["durationUs"] = (Now()-started)/1000;
     return out;
@@ -170,8 +178,12 @@ void Connect() {
                 {"required",{"ref","name"}},{"properties",{{"ref",formSchema},{"name",{{"type","string"},{"minLength",1},{"maxLength",128}}},
                     {"firstPerson",{{"type","boolean"}}}}}}}}},
             {"timeoutMs",{{"type","integer"},{"minimum",100},{"maximum",3000}}}}}};
+    auto schema=inputSchema;
+    schema["properties"]["physics"]={{"type","object"},{"additionalProperties",false},{"required",{"refs"}},
+        {"properties",{{"refs",{{"type","array"},{"minItems",1},{"maxItems",16},{"items",formSchema}}},
+                       {"afterSequence",{{"type","integer"},{"minimum",0}}}}}};
     const json descriptor{{"description","Read selected world reference/node state in one bounded main-thread task; no game mutation"},
-        {"readOnly",true},{"inputSchema",inputSchema},
+        {"readOnly",true},{"inputSchema",schema},
         {"capabilities",Capabilities()}};
     api->RegisterToolExtension("inspect","world_observer",descriptor.dump().c_str(),Handle,nullptr);
     spdlog::info("Registered inspect world_observer, host build {}",api->GetBuildNumber());
@@ -179,7 +191,7 @@ void Connect() {
 void OnMessage(SKSE::MessagingInterface::Message* m) {
     if (!m) return;
     if (m->type==SKSE::MessagingInterface::kPostPostLoad) Connect();
-    if (m->type==SKSE::MessagingInterface::kPreLoadGame || m->type==SKSE::MessagingInterface::kNewGame) { ++generation; loading.store(true); }
+    if (m->type==SKSE::MessagingInterface::kPreLoadGame || m->type==SKSE::MessagingInterface::kNewGame) { ++generation; loading.store(true); observer::physics::Invalidate(); }
     // SKSEVR encodes the load result in the pointer value, not a pointed-to bool.
     if (m->type==SKSE::MessagingInterface::kPostLoadGame) loading.store(m->data==nullptr);
     if (m->type==SKSE::MessagingInterface::kNewGame) loading.store(false);
@@ -207,6 +219,6 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.1.0 loaded, session {}",session);
+    spdlog::info("World observer 0.2.0 loaded, session {}",session);
     return true;
 }

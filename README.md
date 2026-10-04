@@ -63,9 +63,11 @@ unobserved transitions between samples.
 [docs/contract.md](docs/contract.md) describes bounds and quality. Reads are
 consistent within one main-thread task; **physics and renderer are not frozen or
 synchronized**. Raw addresses are not exported. Scene transforms are engine units
-and must not be confused with OpenVR metres. Physics velocities/contacts and
-render pixels are explicitly unavailable in0.1.0, pending safe phase-specific
-collectors. No synthetic interaction or arbitrary script/memory access exists.
+and must not be confused with OpenVR metres. Version0.2.0 adds optional
+read-locked rigid-body velocities/status and passive Havok contact callbacks;
+see [docs/physics.md](docs/physics.md). Contacts identify their callback phase
+and do not prove final solver acceptance or absence of collisions. Render pixels
+remain unavailable. No synthetic interaction or arbitrary script/memory access exists.
 
 Queued requests are abandoned after their deadline. An already-started read may
 finish after the client times out; its outcome is not reported as success. Loading
@@ -81,7 +83,8 @@ uses BSD-3-Clause; the other listed pins use MIT/MIT-style notices.
 ## Verification
 
 `ctest --test-dir <build-dir> -C Release --output-on-failure` checks request bounds,
-invalid identifiers, timeout cancellation, stale generations and transform data.
+invalid identifiers, timeout cancellation, stale generations, transform data,
+physics subscription leases/epochs, contact-ring gaps and native lock validation.
 `python -m unittest discover -s tests -p "test_*.py"` checks trace safety and loss
 accounting. Compilation does not replace the separate live qualification reported
 in the project journal; see [docs/validation.md](docs/validation.md).

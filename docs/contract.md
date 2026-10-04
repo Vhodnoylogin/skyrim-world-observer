@@ -5,12 +5,13 @@
 name<=128bytes, firstPerson boolean), timeoutMs (100..3000, default1500).
 Request text is limited to16KiB and at most4 queued/active tasks. FormIDs must be
 unsigned32-bit integers or hexadecimal strings; zero and arbitrary selectors
-are rejected. Physics/render requests are not silently accepted.
+are rejected. Optional physics requests are documented in [physics.md](physics.md).
+Render requests are rejected.
 
 The envelope contains schemaVersion, observerVersion, sessionId, loadGeneration,
 sampleId, producerFrame, producerMonotonicNs, durationUs, phase and coherence.
-The phase is `skse_main_thread_task`; producerFrame can be null when unavailable.
-There is no post-physics/pre-render guarantee. Ref/node arrays include availability
+The envelope phase is `skse_main_thread_task`; producerFrame can be null when unavailable.
+Physics has its own body/contact phase and units. There is no post-physics/pre-render guarantee. Ref/node arrays include availability
 and reasons. Unavailable is distinct from a deleted/disabled observed reference.
 Quality is complete only when all requested observations are available.
 
@@ -21,6 +22,10 @@ local and world transforms: row-major3x3 rotation, translation in engine units,
 scale, bounds and scene-graph collision-object presence. This last flag is not a
 physics-body/contact assertion. NaN/Inf transforms are unavailable. No pointers
 are serialized; invalid refs and missing3D/nodes return structured unavailable.
+Third-person refs/nodes and physics share the typed loaded scene root, falling
+back to the explicit third-person getter. First-person node selection continues
+to use the first-person getter. This avoids inconsistent nonactor availability
+between the reference, node and physics domains.
 
 Load-generation messages invalidate queued work. Snapshots requested while
 loading fail; generation changes before execution abandon the sample. Observations

@@ -1,4 +1,6 @@
 #include "Contract.h"
+#include "PhysicsCache.h"
+#include "NativeLockValidation.h"
 #include <iostream>
 #include <limits>
 using observer::json;
@@ -15,6 +17,38 @@ int main() {
     Reject([]{observer::Parse(json{{"timeoutMs",std::uint64_t(UINT32_MAX)+101}});});
     Reject([]{observer::Parse(json{{"nodes",{{{"ref",20},{"name","Hand"},{"firstPerson",1}}}}});});
     Reject([]{observer::Parse(json{{"physics",true}});});
+    auto p=observer::Parse(json{{"physics",{{"refs",{"0xFF000001"}},{"afterSequence",5}}}});
+    Require(p.physicsRefs.size()==1 && p.afterSequence==5);
+    Reject([]{observer::Parse(json{{"physics",{{"refs",json::array()}}}});});
+    Reject([]{observer::Parse(json{{"physics",{{"refs",{20}},{"afterSequence",-1}}}});});
+    Reject([]{observer::Parse(json{{"physics",{{"refs",{20}},{"mutate",true}}}});});
+    observer::physics::Cache<2> cache;
+    const std::array<std::uint32_t,1> watched{42};
+    cache.Arm(watched,2,100);
+    Require(cache.Interested(42,7,2,101));
+    Require(!cache.Interested(7,8,2,101));
+    Require(!cache.Interested(42,7,3,101));
+    Require(!cache.Interested(42,7,2,5000000100LL));
+    observer::physics::Contact contact;contact.generation=2;contact.world=1;contact.timeNs=101;
+    cache.Push(contact);cache.Push(contact);cache.Push(contact);
+    Require(cache.Gap(0) && !cache.Gap(1));
+    Require(!cache.Gap(UINT64_MAX));
+    Require(cache.Since(0,2,1).size()==2);
+    Require(cache.Since(0,3,1).empty() && cache.Since(0,2,2).empty());
+    cache.Arm(watched,3,102);Require(cache.Since(0,3,1).empty());
+    const auto epoch=cache.epoch;cache.Arm(watched,3,103);Require(cache.epoch==epoch);
+    const std::array<std::uint32_t,1> changed{43};cache.Arm(changed,3,104);
+    Require(cache.epoch>epoch && !cache.Interested(42,7,3,105) && cache.Interested(43,7,3,105));
+    cache.Invalidate();Require(!cache.Interested(42,7,3,103));
+    using observer::physics::LockWords;
+    auto readLock=[](LockWords* l){++l->count;return true;};
+    auto writeLock=[](LockWords* l){if(l->writer==42)++l->count;else{l->writer=42;l->count=0x80000001u;}return true;};
+    auto unRead=[](LockWords* l){--l->count;};
+    auto unWrite=[](LockWords* l){if(l->count-1==0x80000000u){l->writer=0;l->count=0;}else --l->count;};
+    Require(observer::physics::ValidateNativeLocks(readLock,writeLock,unRead,unWrite,42));
+    // Reject the exact reviewed defect: writer flag without native count1.
+    auto defective=[](LockWords* l){l->writer=42;l->count=0x80000000u;return true;};
+    Require(!observer::physics::ValidateNativeLocks(readLock,defective,unRead,unWrite,42));
     observer::Gate expired(100,2); Require(!expired.Begin(100,2,false));
     observer::Gate stale(100,2); Require(!stale.Begin(50,3,false));
     observer::Gate loading(100,2); Require(!loading.Begin(50,2,true));
