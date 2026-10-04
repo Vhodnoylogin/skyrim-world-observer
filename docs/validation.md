@@ -46,3 +46,29 @@ performed. Failed-load handling follows SKSEVR's documented success-pointer ABI;
 deadline/cancellation conditions are covered by native contract checks and review.
 This is one qualified environment, not a clean-machine runtime certification.
 Physics velocities/contacts, render capture and continuous observation are absent.
+
+## Subsequent full integration qualification
+
+Final run `20261004-131617-d656c3` passed with the **default clean-build DLL**
+SHA256 `e4b7959d5c53f7bf8073ecafac74c297263899e6b6e1e68d8cf3ed633c7cca32`.
+It combined physical motion in both hand trees, exact-reference HIGGS grab,
+one-second continuous hold, release/world presence, then all six observer checks
+and a second save load. All739 restoration paths were independently verified with
+zero mismatches; original saves matched their pins and the temporary DLL was removed.
+
+Additional attempts exposed a runner readiness gap: a startup MessageBoxMenu could
+arrive after the first ready check and pause the world. The runner now rechecks and
+closes only the already authorized one-button Speech Broker startup message before
+hand sampling and the grip edge; unknown prompts fail. Both-hand movement is awaited
+within a bound. Two safety regressions check known-message exact-body acceptance
+and refusal of unknown/multiple-choice prompts; all15 runner checks passed.
+The final combined run observed and cleared that recognized message.
+
+The observer movement fixture returns the hand to a neutral unconstrained pose
+before its additional10cm movement assertion. An intermediate combined attempt
+passed grip/release but failed the observer movement assertion while still near
+the floor; it remains a recorded failure, not a pass obtained by weakening the
+movement threshold. A control full run without the observer also passed. Review
+found no observer VR subscription/hook or engine reads before its first snapshot;
+equal shifts in existing SKSE plugin handles preserve VR callback order. Startup
+timing can still change when another DLL is loaded.
