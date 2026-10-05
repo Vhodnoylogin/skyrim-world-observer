@@ -66,3 +66,5 @@ These are loaded engine mappings, not a claim that a resulting event occurred.
 Device3/4 and first-context layout are pinned to the same CommonLibVR commit;
 older SDK VR enum names are not used to guess device identity. Primary/secondary
 roles do not themselves prove the player's physical handedness.
+
+Observer0.2.4 adds `vrPicking.nodes.secondaryAim` from the actual SecondaryMagicAimNode. Both aim-node transforms are observations, not input commands or proof of resulting activation. A consumer must require an exact current target for the physical hand used by its input mapping. Missing secondary node remains unavailable.

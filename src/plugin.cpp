@@ -41,7 +41,7 @@ json Error(std::string reason, std::string outcome = "rejected") {
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.3"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.4"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},
         {"domains",{{"references",true},{"nodes",true},{"vrPicking",true},{"physics",true},{"render",false}}},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
@@ -113,6 +113,7 @@ json ReadVRPicking(std::uint64_t gen) {
         add("rightWand",nodes->RightWandNode.get());
         add("uprightHmd",nodes->UprightHmdNode.get());
         add("primaryAim",nodes->PrimaryMagicAimNode.get());
+        add("secondaryAim",nodes->SecondaryMagicAimNode.get());
     }
     // Exact VR layout: first context at0x60, BSTArray stride0x18; device3/4
     // are Vive primary/secondary. The older SDK enum names these differently.
@@ -183,7 +184,7 @@ json Frame() {
 }
 json Snapshot(const observer::Request& request, std::uint64_t gen) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.2.3"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.2.4"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",Frame()},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -324,6 +325,6 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.2.3 loaded, session {}",session);
+    spdlog::info("World observer 0.2.4 loaded, session {}",session);
     return true;
 }
