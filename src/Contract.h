@@ -10,6 +10,11 @@
 
 namespace observer {
 using json = nlohmann::json;
+inline bool InitialWorldReadable(std::uint64_t generation, bool loading,
+                                 bool player3D, bool attachedCell, bool playroom,
+                                 bool paused, bool startupMenu) {
+    return generation == 0 && loading && player3D && attachedCell && !playroom && !paused && !startupMenu;
+}
 inline std::uint32_t Form(const json& value) {
     if (value.is_number_integer()) {
         if (value.is_number_unsigned()) {

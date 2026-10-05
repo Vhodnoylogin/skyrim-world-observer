@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(SkyrimWorldObserver VERSION 0.2.0 LANGUAGES CXX)
+project(SkyrimWorldObserver VERSION 0.2.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_SKIP_INSTALL_RULES ON)

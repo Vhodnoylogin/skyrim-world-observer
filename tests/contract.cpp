@@ -49,6 +49,13 @@ int main() {
     // Reject the exact reviewed defect: writer flag without native count1.
     auto defective=[](LockWords* l){l->writer=42;l->count=0x80000000u;return true;};
     Require(!observer::physics::ValidateNativeLocks(readLock,defective,unRead,unWrite,42));
+    Require(observer::InitialWorldReadable(0,true,true,true,false,false,false));
+    Require(!observer::InitialWorldReadable(1,true,true,true,false,false,false));
+    Require(!observer::InitialWorldReadable(0,true,false,true,false,false,false));
+    Require(!observer::InitialWorldReadable(0,true,true,false,false,false,false));
+    Require(!observer::InitialWorldReadable(0,true,true,true,true,false,false));
+    Require(!observer::InitialWorldReadable(0,true,true,true,false,true,false));
+    Require(!observer::InitialWorldReadable(0,true,true,true,false,false,true));
     observer::Gate expired(100,2); Require(!expired.Begin(100,2,false));
     observer::Gate stale(100,2); Require(!stale.Begin(50,3,false));
     observer::Gate loading(100,2); Require(!loading.Begin(50,2,true));

@@ -22,12 +22,26 @@ std::atomic<int> pending{0};
 std::atomic<bool> loading{true};
 DevBenchAPI::IDevBenchInterface001* api = nullptr;
 
+bool InitialWorldReadable() {
+    const auto ui = RE::UI::GetSingleton();
+    const auto player = RE::PlayerCharacter::GetSingleton();
+    const auto cell = player ? player->GetParentCell() : nullptr;
+    if (!ui || !player || !cell) return false;
+    const auto editor = cell->GetFormEditorID();
+    const bool playroom = !editor || std::strcmp(editor, "VRPlayroom01") == 0;
+    const bool blocked = ui->IsMenuOpen("Main Menu") || ui->IsMenuOpen("Loading Menu") ||
+                         ui->IsMenuOpen("RaceSex Menu") || ui->IsMenuOpen("CalibrationOptionMenu") ||
+                         ui->IsMenuOpen("MessageBoxMenu") || ui->IsMenuOpen("Fader Menu");
+    return observer::InitialWorldReadable(generation.load(), loading.load(),
+        observer::SceneRoot(player) != nullptr, cell->IsAttached(), playroom, ui->GameIsPaused(), blocked);
+}
+
 json Error(std::string reason, std::string outcome = "rejected") {
     return {{"schemaVersion",1},{"ok",false},{"sessionId",session},{"loadGeneration",generation.load()},
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.0"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.1"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},
         {"domains",{{"references",true},{"nodes",true},{"physics",true},{"render",false}}},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
@@ -95,7 +109,7 @@ json Frame() {
 }
 json Snapshot(const observer::Request& request, std::uint64_t gen) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.2.0"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.2.1"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",Frame()},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -132,7 +146,7 @@ void Handle(void*,const char* text,void* sink,DevBenchAPI::WriteFn write) {
         else {
             if (action!="snapshot") throw std::invalid_argument("Unsupported action");
             auto request=observer::Parse(args);
-            if (loading.load()) result=Error("World loading or not yet initialized");
+            if (loading.load() && generation.load() != 0) result=Error("World loading or not yet initialized");
             else if (!SKSE::GetTaskInterface()) result=Error("SKSE tasks unavailable");
             else if (pending.fetch_add(1)>=4) { --pending; result=Error("Observer task capacity exceeded"); }
             else {
@@ -144,8 +158,24 @@ void Handle(void*,const char* text,void* sink,DevBenchAPI::WriteFn write) {
                 auto future=job->promise.get_future();
                 SKSE::GetTaskInterface()->AddTask([job]() {
                     struct Finally { ~Finally(){ --pending; } } finally;
-                    if (!job->gate.Begin(Now(),generation.load(),loading.load())) {
+                    // Alternate starts can reach a real world without the hooked
+                    // vanilla quest dispatching SKSE's NewGame message. Establish
+                    // only the initial epoch from actual main-thread world state.
+                    // Never recover a failed/ongoing load or rebind a stale job.
+                    const bool initial = job->gen == 0 && InitialWorldReadable();
+                    if (!job->gate.Begin(Now(),generation.load(),initial ? false : loading.load())) {
                         job->promise.set_value(Error("Queued observation expired or load generation changed","abandoned_before_start")); return;
+                    }
+                    if (initial) {
+                        job->gen = ++generation;
+                        loading.store(false);
+                        observer::physics::Invalidate();
+                        if (api) {
+                            const json event{{"schemaVersion",1},{"sessionId",session},
+                                {"loadGeneration",job->gen},{"loading",false},{"event","initialWorldObserved"},
+                                {"basis","loaded_player3d_attached_cell_no_startup_menu"},{"producerMonotonicNs",Now()}};
+                            api->EmitEvent("world_observer.lifecycle",event.dump().c_str());
+                        }
                     }
                     try {
                         auto value=Snapshot(job->request,job->gen);
@@ -219,6 +249,6 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.2.0 loaded, session {}",session);
+    spdlog::info("World observer 0.2.1 loaded, session {}",session);
     return true;
 }

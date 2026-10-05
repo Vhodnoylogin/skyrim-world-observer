@@ -34,6 +34,15 @@ for the post-load notification. Data copied
 inside one task is coherent within that main-thread operation, but other engine
 domains may run asynchronously. There is no global physics/render snapshot.
 
+If no world lifecycle message has ever arrived (generation0), the first request
+can establish initial generation1 inside its bounded main-thread task. This
+requires actual loaded player3D in an attached cell outside the VR playroom,
+unpaused game and no startup/loading/character/modal/fade menus. It emits
+`initialWorldObserved` with its explicit observation basis, not a fabricated SKSE
+NewGame event. This path never recovers an ongoing/failed load or rebinds work
+after any existing generation. It establishes readable data, not the executor's
+gameplay readiness or subject-test start.
+
 The observer emits `world_observer.lifecycle` through DevBench after registration.
 DevBench's event sequence/retention remains authoritative; our payload adds session
 and generation. The trace client records poll timing/missed intervals, refuses
