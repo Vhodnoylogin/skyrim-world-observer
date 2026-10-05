@@ -43,6 +43,15 @@ NewGame event. This path never recovers an ongoing/failed load or rebinds work
 after any existing generation. It establishes readable data, not the executor's
 gameplay readiness or subject-test start.
 
+`vrPicking` reports left/right/headset engine target identity and raw collision
+points, plus fixed VR rig node transforms when available. Targets are distinct
+from SKSE's cached Papyrus crosshair reference. A zero handle is `none`; an
+unresolved nonzero handle is `unavailable`. Raw collision-point fields do not
+prove a fresh ray hit. Nodes/points use engine world units, not OpenVR metres;
+their phase is the same main-thread sample, not a physics/render freeze. The
+VR1.4.15 three-device layout was checked against CommonLibVR commit
+94faaed0c60eddd8347767f2d4d29a97c93bde8c; external headers are not bundled.
+
 The observer emits `world_observer.lifecycle` through DevBench after registration.
 DevBench's event sequence/retention remains authoritative; our payload adds session
 and generation. The trace client records poll timing/missed intervals, refuses

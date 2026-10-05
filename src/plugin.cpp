@@ -41,9 +41,9 @@ json Error(std::string reason, std::string outcome = "rejected") {
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.1"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.2"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},
-        {"domains",{{"references",true},{"nodes",true},{"physics",true},{"render",false}}},
+        {"domains",{{"references",true},{"nodes",true},{"vrPicking",true},{"physics",true},{"render",false}}},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
         {"physics",{{"bodies",true},{"contactCallbacks",true},{"currentManifold",false},{"continuousContactCoverage",false},
                     {"bounds",{{"refs",16},{"bodies",64},{"sceneNodes",128},{"contactRing",256},{"worldLifetimeSubscriptions",32},{"leaseMs",5000}}}}},
@@ -67,6 +67,52 @@ json Identity(RE::TESObjectREFR* ref, std::uint64_t gen) {
     if (!ref->IsDynamicForm() && file) {
         out["sourcePlugin"] = file->fileName;
         out["localFormId"] = Hex(ref->GetLocalFormID());
+    }
+    return out;
+}
+json ReadVRPicking(std::uint64_t gen) {
+    json out{{"status","available"},{"phase","skse_main_thread_task"},
+        {"units","skyrim_engine_units"},{"space","world"},
+        {"collisionPointValidity","raw engine field; not proof of a fresh hit"},
+        {"devices",json::object()},{"nodes",json::object()}};
+    const auto picks = RE::CrosshairPickData::GetSingleton();
+    if (!picks) return {{"status","unavailable"},{"reason","VR pick data unavailable"}};
+    // SkyrimVR1.4.15 holds three target handles from offset4 and three
+    // collision points from offset0x28. The pinned3.7.0 flat SDK declaration
+    // represents one device, so do not dereference its named scalar fields.
+    std::array<std::uint32_t,3> handles{};
+    std::array<RE::NiPoint3,3> points{};
+    static_assert(sizeof(RE::NiPoint3)==12);
+    const auto bytes = reinterpret_cast<const std::byte*>(picks);
+    std::memcpy(handles.data(),bytes+4,sizeof(handles));
+    std::memcpy(points.data(),bytes+0x28,sizeof(points));
+    std::array<std::uint32_t,3> rechecked{};
+    std::memcpy(rechecked.data(),bytes+4,sizeof(rechecked));
+    if (handles!=rechecked) return {{"status","unavailable"},{"reason","VR target handles changed during read"}};
+    constexpr std::array names{"left","right","headset"};
+    for (std::size_t i=0;i<3;++i) {
+        RE::NiPointer<RE::TESObjectREFR> ref;
+        if (handles[i]) RE::LookupReferenceByHandle(handles[i],ref);
+        json device{{"targetStatus",handles[i] ? (ref ? "available" : "unavailable") : "none"},
+                    {"target",ref ? Identity(ref.get(),gen) : json(nullptr)},
+                    {"collisionPoint",Vec(points[i])}};
+        if (!observer::Finite(device)) device={{"targetStatus","unavailable"},{"reason","Non-finite VR picking data"}};
+        out["devices"][names[i]]=std::move(device);
+    }
+    const auto player = RE::PlayerCharacter::GetSingleton();
+    const auto nodes = player ? player->GetVRNodeData() : nullptr;
+    if (nodes) {
+        const auto add = [&](const char* role, RE::NiNode* node) {
+            json value = node ? json{{"status","available"},{"world",Transform(node->world)},
+                                     {"name",node->name.c_str() ? node->name.c_str() : ""}}
+                              : json{{"status","unavailable"},{"reason","VR node missing"}};
+            if (!observer::Finite(value)) value={{"status","unavailable"},{"reason","Non-finite VR node transform"}};
+            out["nodes"][role]=std::move(value);
+        };
+        add("leftWand",nodes->LeftWandNode.get());
+        add("rightWand",nodes->RightWandNode.get());
+        add("uprightHmd",nodes->UprightHmdNode.get());
+        add("primaryAim",nodes->PrimaryMagicAimNode.get());
     }
     return out;
 }
@@ -109,7 +155,7 @@ json Frame() {
 }
 json Snapshot(const observer::Request& request, std::uint64_t gen) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.2.1"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.2.2"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",Frame()},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -117,6 +163,7 @@ json Snapshot(const observer::Request& request, std::uint64_t gen) {
         {"refs",json::array()},{"nodes",json::array()},
         {"physics",{{"status","unavailable"},{"reason","No safe phase collector"}}},
         {"render",{{"status","unavailable"},{"reason","No renderer provider"}}}};
+    out["vrPicking"]=ReadVRPicking(gen);
     bool complete = true;
     for (auto id : request.refs) { auto value=ReadRef(id,gen); complete &= value["status"]=="available"; out["refs"].push_back(std::move(value)); }
     for (const auto& n : request.nodes) { auto value=ReadNode(n,gen); complete &= value["status"]=="available"; out["nodes"].push_back(std::move(value)); }
@@ -249,6 +296,6 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.2.1 loaded, session {}",session);
+    spdlog::info("World observer 0.2.2 loaded, session {}",session);
     return true;
 }
