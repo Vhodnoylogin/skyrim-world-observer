@@ -41,7 +41,7 @@ json Error(std::string reason, std::string outcome = "rejected") {
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.2"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.3"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},
         {"domains",{{"references",true},{"nodes",true},{"vrPicking",true},{"physics",true},{"render",false}}},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
@@ -114,6 +114,34 @@ json ReadVRPicking(std::uint64_t gen) {
         add("uprightHmd",nodes->UprightHmdNode.get());
         add("primaryAim",nodes->PrimaryMagicAimNode.get());
     }
+    // Exact VR layout: first context at0x60, BSTArray stride0x18; device3/4
+    // are Vive primary/secondary. The older SDK enum names these differently.
+    json bindings{{"status","unavailable"},{"reason","Gameplay control map unavailable"}};
+    const auto controlMap = RE::ControlMap::GetSingleton();
+    const auto context = controlMap ? controlMap->controlMap[0] : nullptr;
+    if (context) {
+        bindings={{"status","available"},{"context","gameplay"},{"devices",json::object()}};
+        static_assert(sizeof(RE::BSTArray<RE::ControlMap::UserEventMapping>)==0x18);
+        constexpr std::array deviceNames{"vivePrimary","viveSecondary"};
+        constexpr std::array events{"Activate","Teleport Or Activate","Jump","Sneak Or Jump"};
+        for (std::size_t role=0;role<2;++role) {
+            const auto& mappings=context->deviceMappings[3+role];
+            if (mappings.size()>256) {
+                bindings={{"status","unavailable"},{"reason","Gameplay mapping bound exceeded"}}; break;
+            }
+            auto values=json::object();
+            for (const char* event:events) {
+                auto matches=json::array();
+                for (const auto& mapping:mappings) {
+                    if (mapping.eventID==event) matches.push_back({{"key",mapping.inputKey},
+                        {"modifier",mapping.modifier},{"linked",mapping.linked}});
+                }
+                values[event]=std::move(matches);
+            }
+            bindings["devices"][deviceNames[role]]=std::move(values);
+        }
+    }
+    out["gameplayBindings"]=std::move(bindings);
     return out;
 }
 json ReadRef(std::uint32_t id, std::uint64_t gen) {
@@ -155,7 +183,7 @@ json Frame() {
 }
 json Snapshot(const observer::Request& request, std::uint64_t gen) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.2.2"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.2.3"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",Frame()},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -296,6 +324,6 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.2.2 loaded, session {}",session);
+    spdlog::info("World observer 0.2.3 loaded, session {}",session);
     return true;
 }

@@ -57,3 +57,12 @@ DevBench's event sequence/retention remains authoritative; our payload adds sess
 and generation. The trace client records poll timing/missed intervals, refuses
 session changes and emits explicit load-generation boundaries. It never claims
 continuous observation between samples, deterministic physics or visual correctness.
+
+Version0.2.3 adds vrPicking.gameplayBindings: fixed gameplay Activate,
+Teleport Or Activate, Jump and Sneak Or Jump rows from actual Vive primary and
+secondary mapping arrays. Each returns all matching key/modifier/linked entries;
+missing rows stay empty, unmapped255 is not a button. Arrays are bounded at256.
+These are loaded engine mappings, not a claim that a resulting event occurred.
+Device3/4 and first-context layout are pinned to the same CommonLibVR commit;
+older SDK VR enum names are not used to guess device identity. Primary/secondary
+roles do not themselves prove the player's physical handedness.
