@@ -41,7 +41,7 @@ json Error(std::string reason, std::string outcome = "rejected") {
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.5"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.6"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},
         {"domains",{{"references",true},{"nodes",true},{"actorState",true},{"vrPicking",true},{"physics",true},{"render",false}}},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
@@ -169,7 +169,12 @@ json ReadRef(std::uint32_t id, std::uint64_t gen,bool actorState=false) {
             else {
                 for(const auto& [object,entry]:inventory)if(object && entry.second && entry.second->IsWorn())worn.push_back(Hex(object->GetFormID()));
                 const auto left=actor->GetEquippedObject(true),right=actor->GetEquippedObject(false);
-                out["actorState"]={{"status","available"},{"lifeState",static_cast<unsigned>(state->GetLifeState())},
+                static_assert(offsetof(RE::TESObjectREFR::REFERENCE_RUNTIME_DATA,refScale)==8);
+                const auto referenceScale=ref->GetReferenceRuntimeData().refScale;
+                out["actorState"]={{"status","available"},{"referenceScalePercent",referenceScale},
+                    {"referenceScale",referenceScale/100.0},{"effectiveScale",out["scale"]},
+                    {"scaleBasis","reference runtime refScale percent separate from engine GetScale including actor height"},
+                    {"lifeState",static_cast<unsigned>(state->GetLifeState())},
                     {"restrained",state->GetLifeState()==RE::ACTOR_LIFE_STATE::kRestrained},
                     {"knockState",static_cast<unsigned>(state->GetKnockState())},{"wornForms",worn},
                     {"equippedLeft",left?json(Hex(left->GetFormID())):json(nullptr)},
@@ -203,7 +208,7 @@ json Frame() {
 }
 json Snapshot(const observer::Request& request, std::uint64_t gen) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.2.5"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.2.6"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",Frame()},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -348,6 +353,6 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.2.5 loaded, session {}",session);
+    spdlog::info("World observer 0.2.6 loaded, session {}",session);
     return true;
 }
