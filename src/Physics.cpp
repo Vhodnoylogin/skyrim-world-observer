@@ -100,6 +100,11 @@ public:
     std::atomic<std::int64_t> until{0};
     const std::atomic<std::uint64_t>* gen=nullptr;
     const std::atomic<bool>* loading=nullptr;
+    std::string captureId;
+    std::unordered_set<std::string> attemptedCaptures;
+    std::vector<std::uint32_t> captureRefs;
+    json captureInitialBodies;
+    std::int64_t captureStartedNs=0,captureEndNs=0;
 };
 // Deliberately process lifetime: a deleted world drops its listener array. It
 // never owns/deletes the callback object. No old-world pointer is retained or
@@ -122,7 +127,7 @@ struct BodyDiagnostics {
 void Gather(RE::NiAVObject* node,std::uint32_t form,std::vector<Body>& out,std::unordered_set<RE::hkpRigidBody*>& seen,
             unsigned& visited,bool& truncated,BodyDiagnostics& diagnostics) {
     if(!node)return;
-    if(visited++>=128 || out.size()>=64){truncated=true;return;}
+    if(visited++>=2048 || out.size()>=64){truncated=true;return;}
     ++diagnostics.nodes;
     // HIGGS's established VR path uses the actual +0x40 collision member and
     // engine RTTI, rather than assuming virtual AsBhk... helpers are populated.
@@ -140,7 +145,7 @@ void Gather(RE::NiAVObject* node,std::uint32_t form,std::vector<Body>& out,std::
         }else ++diagnostics.unsupportedCollision;
     }
     if(auto branch=node->AsNode())for(const auto& child:branch->GetChildren()) {
-        if(visited>=128 || out.size()>=64){truncated=true;break;}
+        if(visited>=2048 || out.size()>=64){truncated=true;break;}
         Gather(child.get(),form,out,seen,visited,truncated,diagnostics);
     }
 }
@@ -170,6 +175,7 @@ json Snapshot(const Request& request,std::uint64_t generation,const std::atomic<
         listener=Find(world);
     }
     if(!listener){
+        if(request.captureAction=="read")return Unavailable("Capture does not exist; read cannot subscribe");
         WorldLock lock(wrapper->worldLock,true);if(!lock)return Unavailable("Physics subscription world busy; retry");
         listener=Find(world);
         if(!listener){
@@ -219,13 +225,40 @@ json Snapshot(const Request& request,std::uint64_t generation,const std::atomic<
             bodies.push_back(std::move(value));
         }
     }
-    const auto now=Now();json contacts=json::array(),coverage;
+    const auto now=Now();json contacts=json::array(),coverage,capture=nullptr;
     {
         std::lock_guard guard(listener->mutex);
-        listener->cache.Arm(uids,generation,now);listener->until.store(listener->cache.untilNs);
+        if(request.captureAction=="start") {
+            if(listener->attemptedCaptures.contains(request.captureId))return Unavailable("Capture id already attempted; never replay");
+            if(listener->attemptedCaptures.size()>=32)return Unavailable("Capture lifetime capacity exceeded");
+            listener->attemptedCaptures.insert(request.captureId);
+            if(now<listener->captureEndNs && listener->cache.generation==generation)return Unavailable("Another bounded capture owns this world");
+            bool selectionComplete=!uids.empty() && !truncated;
+            for(const auto& ref:refs)selectionComplete&=ref["status"]=="available";
+            for(const auto& body:bodies)selectionComplete&=body["status"]=="available";
+            if(!selectionComplete)return Unavailable("Bounded capture requires complete nonempty rigid body selection");
+            listener->cache.StartBounded(uids,generation,now,request.captureWindowNs);
+            listener->captureId=request.captureId;listener->captureRefs=request.physicsRefs;
+            listener->captureStartedNs=now;listener->captureEndNs=listener->cache.untilNs;
+            listener->captureInitialBodies=bodies;
+        } else if(request.captureAction=="read") {
+            if(listener->captureId!=request.captureId || listener->captureRefs!=request.physicsRefs ||
+               listener->cache.generation!=generation || listener->cache.startNs!=listener->captureStartedNs || loading.load())
+                return Unavailable("Capture identity/world/epoch changed or unavailable; read never rearms");
+        } else if(now>=listener->captureEndNs || listener->cache.generation!=generation) {
+            listener->cache.Arm(uids,generation,now);
+        } else if(!listener->cache.SameBodies(uids)) {
+            return Unavailable("Exclusive bounded capture active for another body selection");
+        }
+        listener->until.store(listener->cache.untilNs);
+        if(!request.captureAction.empty())capture={{"id",listener->captureId},{"startedNs",listener->captureStartedNs},
+            {"endNs",listener->captureEndNs},{"windowComplete",now>=listener->captureEndNs},
+            {"bodySelectionChanged",!listener->cache.SameBodies(uids)},{"initialBodies",listener->captureInitialBodies},
+            {"readExtendedLease",false}};
+        const auto& selectedUids=request.captureAction.empty()?uids:listener->cache.Watched();
         for(const auto& c:listener->cache.Since(request.afterSequence,generation,listener->worldId)){
-            bool selected=false;for(auto uid:uids)selected|=uid==c.bodyA || uid==c.bodyB;if(!selected)continue;
-            json value{{"sequence",c.sequence},{"producerMonotonicNs",c.timeNs},{"worldId",c.world},
+            bool selected=false;for(auto uid:selectedUids)selected|=uid==c.bodyA || uid==c.bodyB;if(!selected)continue;
+            json value{{"sequence",c.sequence},{"producerMonotonicNs",c.timeNs},{"worldId",c.world},{"loadGeneration",c.generation},
                 {"bodyA",c.bodyA},{"bodyB",c.bodyB},{"position",c.position},{"normalBtoA",c.normal},
                 {"signedSeparation",c.separation},{"separatingVelocity",c.velocityAvailable?json(c.separatingVelocity):json(nullptr)},
                 {"disabled",c.flagsAvailable?json((c.flags&8)!=0):json(nullptr)},
@@ -246,12 +279,22 @@ json Snapshot(const Request& request,std::uint64_t generation,const std::atomic<
     }
     bool complete=!truncated;for(const auto& ref:refs)complete&=ref["status"]=="available";
     for(const auto& b:bodies)complete&=b["status"]=="available";
+    const bool sampleLimit=contacts.size()>request.maximumSamples;
+    if(sampleLimit)contacts.erase(contacts.begin(),contacts.end()-request.maximumSamples);
+    json conversion={{"status","unavailable"},{"reason","Native world scale unavailable"}};
+    try {
+        const auto scale=RE::bhkWorld::GetWorldScale(),inverse=RE::bhkWorld::GetWorldScaleInverse();
+        if(std::isfinite(scale) && std::isfinite(inverse) && scale>0 && inverse>0 && std::abs(scale*inverse-1)<0.001)
+            conversion={{"status","available"},{"havokUnitsPerGameUnit",scale},{"gameUnitsPerHavokUnit",inverse},
+                        {"basis","native bhkWorld scale and inverse; reciprocal check"}};
+    } catch(...) {}
     return {{"status",complete?"available":"partial"},{"worldId",listener->worldId},{"sampleMonotonicNs",now},
         {"bodyPhase","skse_main_thread_try_read_locked_world"},{"contactPhase","havok_contact_point_callback"},
         {"units",{{"position","havok_world_units"},{"linearVelocity","havok_world_units_per_second"},{"angularVelocity","radians_per_second"}}},
         {"coherence","body_state_one_world_read_lock_contacts_asynchronous"},{"refs",refs},{"bodies",bodies},
         {"quality",{{"bodies",complete?"complete":"partial"},{"contacts","sampled_callback_coverage"}}},
-        {"truncated",truncated},{"contacts",contacts},{"coverage",coverage},
+        {"truncated",truncated},{"contacts",contacts},{"coverage",coverage},{"capture",capture},
+        {"sampleLimitTruncated",sampleLimit},{"sceneUnitConversion",conversion},
         {"currentManifoldAvailable",false},{"constraintsAndCharacterProxiesAvailable",false}};
 }
 }

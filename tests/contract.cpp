@@ -23,6 +23,13 @@ int main() {
     Reject([]{observer::Parse(json{{"physics",{{"refs",{20}},{"afterSequence",-1}}}});});
     Reject([]{observer::Parse(json{{"physics",{{"refs",{20}},{"mutate",true}}}});});
     observer::physics::Cache<2> cache;
+    auto bounded=observer::Parse(json{{"actorState",true},{"physics",{{"refs",{20}},
+        {"captureAction","start"},{"captureId",std::string(32,'a')},{"captureWindowMs",60000},{"maximumSamples",256}}}});
+    Require(bounded.actorState && bounded.captureWindowNs==60000000000LL);
+    Reject([]{observer::Parse(json{{"physics",{{"refs",{20}},{"captureAction","read"},{"captureId",std::string(32,'a')},{"captureWindowMs",1}}}});});
+    Reject([]{observer::Parse(json{{"physics",{{"refs",{20}},{"captureAction","start"},{"captureId",std::string(32,'a')},{"captureWindowMs",60001}}}});});
+    Reject([]{observer::Parse(json{{"actorState",1}});});
+    Reject([]{observer::Parse(json{{"physics",{{"refs",{20}},{"maximumSamples",true}}}});});
     const std::array<std::uint32_t,1> watched{42};
     cache.Arm(watched,2,100);
     Require(cache.Interested(42,7,2,101));
@@ -40,6 +47,16 @@ int main() {
     const std::array<std::uint32_t,1> changed{43};cache.Arm(changed,3,104);
     Require(cache.epoch>epoch && !cache.Interested(42,7,3,105) && cache.Interested(43,7,3,105));
     cache.Invalidate();Require(!cache.Interested(42,7,3,103));
+    cache.StartBounded(watched,4,1000,60000000000LL);
+    const auto fixedEnd=cache.untilNs;const auto fixedEpoch=cache.epoch;
+    Require(cache.SameBodies(watched) && !cache.SameBodies(changed));
+    Require(cache.Interested(42,7,4,fixedEnd-1) && !cache.Interested(42,7,4,fixedEnd));
+    Require(!cache.Interested(42,7,4,999));
+    contact.generation=4;contact.timeNs=1001;cache.Push(contact);
+    contact.timeNs=fixedEnd;cache.Push(contact);
+    Require(cache.Since(0,4,1).size()==1);
+    cache.Since(0,4,1);Require(cache.untilNs==fixedEnd && cache.epoch==fixedEpoch);
+    Reject([&]{cache.StartBounded(watched,4,1000,60000000001LL);});
     using observer::physics::LockWords;
     auto readLock=[](LockWords* l){++l->count;return true;};
     auto writeLock=[](LockWords* l){if(l->writer==42)++l->count;else{l->writer=42;l->count=0x80000001u;}return true;};

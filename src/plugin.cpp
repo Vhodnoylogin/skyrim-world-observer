@@ -41,12 +41,12 @@ json Error(std::string reason, std::string outcome = "rejected") {
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.4"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.2.5"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},
-        {"domains",{{"references",true},{"nodes",true},{"vrPicking",true},{"physics",true},{"render",false}}},
+        {"domains",{{"references",true},{"nodes",true},{"actorState",true},{"vrPicking",true},{"physics",true},{"render",false}}},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
-        {"physics",{{"bodies",true},{"contactCallbacks",true},{"currentManifold",false},{"continuousContactCoverage",false},
-                    {"bounds",{{"refs",16},{"bodies",64},{"sceneNodes",128},{"contactRing",256},{"worldLifetimeSubscriptions",32},{"leaseMs",5000}}}}},
+        {"physics",{{"bodies",true},{"contactCallbacks",true},{"boundedCapture",true},{"maximumCaptureMs",60000},{"currentManifold",false},{"continuousContactCoverage",false},
+                    {"bounds",{{"refs",16},{"bodies",64},{"sceneNodes",2048},{"contactRing",256},{"worldLifetimeSubscriptions",32},{"leaseMs",5000}}}}},
         {"renderReason","No renderer provider"}};
 }
 json Vec(const RE::NiPoint3& v) { return json::array({v.x,v.y,v.z}); }
@@ -145,7 +145,7 @@ json ReadVRPicking(std::uint64_t gen) {
     out["gameplayBindings"]=std::move(bindings);
     return out;
 }
-json ReadRef(std::uint32_t id, std::uint64_t gen) {
+json ReadRef(std::uint32_t id, std::uint64_t gen,bool actorState=false) {
     const auto ref = Ref(id);
     if (!ref) return {{"form",Hex(id)},{"status","unavailable"},{"reason","Reference not resolved"}};
     json out{{"identity",Identity(ref,gen)},{"status","available"},{"deleted",ref->IsDeleted()},
@@ -158,6 +158,25 @@ json ReadRef(std::uint32_t id, std::uint64_t gen) {
     const auto root = observer::SceneRoot(ref);
     out["loaded3D"] = root != nullptr;
     out["sceneTransform"] = root ? Transform(root->world) : json(nullptr);
+    if(actorState) {
+        auto actor=ref->As<RE::Actor>();
+        if(!actor)out["actorState"]={{"status","unavailable"},{"reason","Reference is not an actor"}};
+        else {
+            const auto state=actor->AsActorState();json worn=json::array();
+            // noInit avoids creating inventory changes while observing equipment.
+            const auto inventory=actor->GetInventory([](RE::TESBoundObject&){return true;},true);
+            if(inventory.size()>256)out["actorState"]={{"status","unavailable"},{"reason","Actor inventory exceeds256entries"}};
+            else {
+                for(const auto& [object,entry]:inventory)if(object && entry.second && entry.second->IsWorn())worn.push_back(Hex(object->GetFormID()));
+                const auto left=actor->GetEquippedObject(true),right=actor->GetEquippedObject(false);
+                out["actorState"]={{"status","available"},{"lifeState",static_cast<unsigned>(state->GetLifeState())},
+                    {"restrained",state->GetLifeState()==RE::ACTOR_LIFE_STATE::kRestrained},
+                    {"knockState",static_cast<unsigned>(state->GetKnockState())},{"wornForms",worn},
+                    {"equippedLeft",left?json(Hex(left->GetFormID())):json(nullptr)},
+                    {"equippedRight",right?json(Hex(right->GetFormID())):json(nullptr)}};
+            }
+        }
+    }
     if (!observer::Finite(out)) return {{"form",Hex(id)},{"status","unavailable"},{"reason","Non-finite reference transform"}};
     return out;
 }
@@ -184,7 +203,7 @@ json Frame() {
 }
 json Snapshot(const observer::Request& request, std::uint64_t gen) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.2.4"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.2.5"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",Frame()},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -194,7 +213,7 @@ json Snapshot(const observer::Request& request, std::uint64_t gen) {
         {"render",{{"status","unavailable"},{"reason","No renderer provider"}}}};
     out["vrPicking"]=ReadVRPicking(gen);
     bool complete = true;
-    for (auto id : request.refs) { auto value=ReadRef(id,gen); complete &= value["status"]=="available"; out["refs"].push_back(std::move(value)); }
+    for (auto id : request.refs) { auto value=ReadRef(id,gen,request.actorState); complete &= value["status"]=="available"; out["refs"].push_back(std::move(value)); }
     for (const auto& n : request.nodes) { auto value=ReadNode(n,gen); complete &= value["status"]=="available"; out["nodes"].push_back(std::move(value)); }
     if(!request.physicsRefs.empty()) {
         out["physics"]=observer::physics::Snapshot(request,gen,generation,loading);
@@ -283,11 +302,15 @@ void Connect() {
             {"nodes",{{"type","array"},{"maxItems",64},{"items",{{"type","object"},{"additionalProperties",false},
                 {"required",{"ref","name"}},{"properties",{{"ref",formSchema},{"name",{{"type","string"},{"minLength",1},{"maxLength",128}}},
                     {"firstPerson",{{"type","boolean"}}}}}}}}},
+            {"actorState",{{"type","boolean"}}},
             {"timeoutMs",{{"type","integer"},{"minimum",100},{"maximum",3000}}}}}};
     auto schema=inputSchema;
     schema["properties"]["physics"]={{"type","object"},{"additionalProperties",false},{"required",{"refs"}},
         {"properties",{{"refs",{{"type","array"},{"minItems",1},{"maxItems",16},{"items",formSchema}}},
-                       {"afterSequence",{{"type","integer"},{"minimum",0}}}}}};
+                       {"afterSequence",{{"type","integer"},{"minimum",0}}},
+                       {"captureAction",{{"enum",{"start","read"}}}},{"captureId",{{"type","string"},{"pattern","^[0-9a-f]{32}$"}}},
+                       {"captureWindowMs",{{"type","integer"},{"minimum",100},{"maximum",60000}}},
+                       {"maximumSamples",{{"type","integer"},{"minimum",1},{"maximum",256}}}}}};
     const json descriptor{{"description","Read selected world reference/node state in one bounded main-thread task; no game mutation"},
         {"readOnly",true},{"inputSchema",schema},
         {"capabilities",Capabilities()}};
@@ -325,6 +348,6 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.2.4 loaded, session {}",session);
+    spdlog::info("World observer 0.2.5 loaded, session {}",session);
     return true;
 }

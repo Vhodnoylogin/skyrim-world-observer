@@ -41,13 +41,17 @@ struct Request {
     int timeoutMs = 1500;
     std::vector<std::uint32_t> physicsRefs;
     std::uint64_t afterSequence = 0;
+    bool actorState = false;
+    std::string captureAction, captureId;
+    std::int64_t captureWindowNs = 0;
+    std::size_t maximumSamples = 256;
 };
 inline Request Parse(const json& args) {
     if (!args.is_object()) throw std::invalid_argument("request must be an object");
     Request r;
     for (const auto& [key, unused] : args.items()) {
         (void)unused;
-        if (key != "kind" && key != "action" && key != "refs" && key != "nodes" && key != "timeoutMs" && key != "physics")
+        if (key != "kind" && key != "action" && key != "refs" && key != "nodes" && key != "timeoutMs" && key != "physics" && key != "actorState")
             throw std::invalid_argument("unsupported request field: " + key);
     }
     if (args.contains("physics")) {
@@ -56,7 +60,7 @@ inline Request Parse(const json& args) {
             throw std::invalid_argument("physics requires refs array of 1..16 FormIDs");
         for (const auto& [key, unused]:p.items()) {
             (void)unused;
-            if(key!="refs" && key!="afterSequence") throw std::invalid_argument("unsupported physics field");
+            if(key!="refs" && key!="afterSequence" && key!="captureAction" && key!="captureId" && key!="captureWindowMs" && key!="maximumSamples") throw std::invalid_argument("unsupported physics field");
         }
         for(const auto& ref:p["refs"]) r.physicsRefs.push_back(Form(ref));
         if(p.contains("afterSequence")) {
@@ -65,6 +69,24 @@ inline Request Parse(const json& args) {
                 throw std::invalid_argument("afterSequence must be nonnegative uint64");
             r.afterSequence=n.get<std::uint64_t>();
         }
+        if(p.contains("maximumSamples")) {
+            if(!p["maximumSamples"].is_number_integer() || p["maximumSamples"]<1 || p["maximumSamples"]>256) throw std::invalid_argument("maximumSamples outside1..256");
+            r.maximumSamples=p["maximumSamples"].get<std::size_t>();
+        }
+        if(p.contains("captureAction")) {
+            r.captureAction=p.at("captureAction").get<std::string>();r.captureId=p.at("captureId").get<std::string>();
+            if((r.captureAction!="start" && r.captureAction!="read") || r.captureId.size()!=32 ||
+               r.captureId.find_first_not_of("0123456789abcdef")!=std::string::npos) throw std::invalid_argument("Exact capture action/id required");
+            if(r.captureAction=="start") {
+                const auto& ms=p.at("captureWindowMs");
+                if(!ms.is_number_integer() || ms<100 || ms>60000) throw std::invalid_argument("Capture window outside100..60000ms");
+                r.captureWindowNs=ms.get<std::int64_t>()*1000000;
+            } else if(p.contains("captureWindowMs")) throw std::invalid_argument("Read cannot extend capture window");
+        } else if(p.contains("captureId") || p.contains("captureWindowMs")) throw std::invalid_argument("Capture action required");
+    }
+    if(args.contains("actorState")) {
+        if(!args["actorState"].is_boolean()) throw std::invalid_argument("actorState must be boolean");
+        r.actorState=args["actorState"].get<bool>();
     }
     if (args.contains("timeoutMs")) {
         if (!args["timeoutMs"].is_number_integer()) throw std::invalid_argument("timeoutMs must be integer");

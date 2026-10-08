@@ -1,4 +1,4 @@
-# Physics observation (0.2.0)
+# Physics observation (0.2.5 candidate)
 
 ```json
 {"kind":"world_observer","physics":{"refs":["0xFF000001"],"afterSequence":0}}
@@ -6,7 +6,7 @@
 
 Use actual loaded reference IDs from the fixture. Up to 16 refs must belong to
 one physics world. Their third-person scene trees are traversed collectively
-up to 128 nodes and 64 distinct `bhkRigidBody` parts. Missing bodies, nonfinite
+up to 2048 nodes and 64 distinct `bhkRigidBody` parts. Missing bodies, nonfinite
 state, exhausted capacity and busy world locks are explicit unavailable/partial
 results. `truncated=true` prohibits claims that all parts were observed.
 Per-ref diagnostics show loaded3D, visited nodes, collision objects and the
@@ -36,6 +36,29 @@ have process lifetime, capped at 32 worlds; the engine owns only pointers in its
 world listener array. Deleted worlds discard their arrays. No saved world pointer
 is ever dereferenced and no callbacks access references/scene trees. A process
 restart resets lifetime capacity and all world/body identities.
+
+The opt-in bounded mode accepts `captureAction:"start"`, a unique32lowercase-hex
+`captureId`, `captureWindowMs`100..60000, `maximumSamples`1..256 and an initial
+`afterSequence`. It requires a complete, nonempty selected rigid-body set. Each
+listener retains at most32 attempted IDs, including rejected attempts; a nonce
+cannot be replayed. Only one bounded capture may own a world at a time. Subsequent
+`captureAction:"read"` requests use the same ID/ref selection and **omit** the
+window. Reads cannot subscribe, renew or rearm. Metadata includes absolute native
+startedNs/endNs, windowComplete, readExtendedLease=false and the original body
+mapping. A later generation/epoch or legacy rearm invalidates the old capture.
+During an active window, legacy reads of the same bodies do not extend it;
+different selections return unavailable. No capture survives an intervening
+game load or process restart.
+
+Contact records retain loadGeneration and must lie inside the fixed time window.
+The response is capped at maximumSamples and explicitly marks sample-limit
+truncation separately from ring overwrite/gaps and callback busy drops. A changed
+current body selection is flagged; original selected UIDs remain the filter.
+`sceneUnitConversion` reads bhkWorld's actual scale and inverse and checks finite,
+positive reciprocal values. Raw Havok fields remain unchanged; conversion is
+unavailable if this check fails. This does not turn callback coverage into a
+complete manifold or final solver observation. Native build/contract tests are
+separate from live qualification of the new mode.
 
 `physics.contacts` contains **actual Havok contact-point callback data**, not
 bounding-box proximity or a collision-object-present flag: body A/B UIDs,

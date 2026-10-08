@@ -1,5 +1,13 @@
 # Skyrim World Observer
 
+The 0.2.5 source candidate adds optional `actorState:true` to reference snapshots:
+actual actor life/restraint/knock state, worn inventory forms and left/right
+equipped forms. It uses noInit inventory reads, bounds returned entries to256 and
+reports unavailable for nonactors/oversize inventory. Map construction still
+depends on the engine inventory size. Fixed-duration passive physics captures
+are described in [physics](docs/physics.md). These additions require separate
+live qualification before replacing any verified installed build.
+
 A read-only Skyrim VR observer for automated tests. One DevBench request copies
 selected reference and skeleton-node state in one SKSE main-thread task. The
 result identifies the session, world-load generation, sample, producing frame,

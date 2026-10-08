@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <vector>
 namespace observer::physics {
 struct Contact {
@@ -17,6 +18,16 @@ struct Contact {
 // Protected externally. The physics callback never waits for this cache's mutex.
 template<std::size_t Capacity=256> class Cache {
 public:
+    bool SameBodies(std::span<const std::uint32_t> bodies)const {
+        if(bodies.size()!=watched.size())return false;
+        for(auto id:bodies){bool found=false;for(auto v:watched)found|=v==id;if(!found)return false;}
+        return true;
+    }
+    void StartBounded(std::span<const std::uint32_t> bodies,std::uint64_t gen,std::int64_t now,std::int64_t duration) {
+        if(bodies.empty() || bodies.size()>64 || duration<100000000LL || duration>60000000000LL)throw std::invalid_argument("Invalid bounded capture");
+        watched.assign(bodies.begin(),bodies.end());generation=gen;startNs=now;untilNs=now+duration;++epoch;
+    }
+    const std::vector<std::uint32_t>& Watched()const{return watched;}
     void Arm(std::span<const std::uint32_t> bodies,std::uint64_t gen,std::int64_t now) {
         bool changed=bodies.size()!=watched.size();
         for(auto id:bodies){bool found=false;for(auto v:watched)found|=v==id;changed|=!found;}
@@ -28,7 +39,7 @@ public:
         }
     }
     bool Interested(std::uint32_t a,std::uint32_t b,std::uint64_t gen,std::int64_t now) const {
-        if(gen!=generation || now>=untilNs) return false;
+        if(gen!=generation || now<startNs || now>=untilNs) return false;
         for(auto v:watched) if(v==a || v==b) return true;
         return false;
     }
@@ -38,7 +49,7 @@ public:
         const auto first=Oldest();
         for(auto s=first;s<=latest && s>0;++s) {
             const auto& c=ring[(s-1)%Capacity];
-            if(c.sequence>cursor && c.generation==gen && c.world==world && c.timeNs>=startNs) out.push_back(c);
+            if(c.sequence>cursor && c.generation==gen && c.world==world && c.timeNs>=startNs && c.timeNs<untilNs) out.push_back(c);
         }
         return out;
     }
