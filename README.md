@@ -1,5 +1,10 @@
 # Skyrim World Observer
 
+The separate **0.3.0-se104** variant supports Skyrim SE1.7.104.0 reference and
+node observations using the modern SDK. See [SE build and contract](docs/se104.md).
+It excludes VR picking, actor inventory state, physics and rendered images.
+The original VR0.2.6 target and its dependencies remain separate.
+
 The 0.2.6 source candidate adds optional `actorState:true` to reference snapshots:
 actual actor life/restraint/knock state, worn inventory forms and left/right
 equipped forms. Reference scale percent is read from the typed native runtime

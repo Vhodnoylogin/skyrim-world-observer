@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "edition": "se",
+  "runtime": "1.7.104.0",
+  "status": "source-build-candidate-not-live-qualified",
+  "CommonLibSSE-NG": {
+    "repository": "https://github.com/Vhodnoylogin/CommonLibSSE-NG.git",
+    "commit": "0c95630c29ff98f64caeea83c29ca373cf93e58b",
+    "baseCommit": "a898f469851c464d05137bb74b069dd234897643",
+    "custody": "External clone/build only; never copy SDK into this repository"
+  },
+  "OpenVR": {
+    "repository": "https://github.com/ValveSoftware/openvr.git",
+    "commit": "60eb187801956ad277f1cae6680e3a410ee0873b",
+    "purpose": "Modern SDK public headers only; no VR driver or process for SE"
+  },
+  "DevBenchAPI": {
+    "repository": "https://github.com/alandtse/devbench",
+    "commit": "32823e465c18a676afc9048ac948aa22a616abd0",
+    "files": {
+      "DevBenchAPI.h": "dfe5f23d305b439853a5ae0392b39e0baae294eba5718b28d5a0fc65003bc440",
+      "DevBenchAPI.cpp": "05824b50e48310cc44f9d81585482aa0e413b030fb6086477a77f427d6ab183e",
+      "DevBenchAPI.LICENSE.txt": "678208fd4c5a5b64995f4b83f2fbb9cef9389c668503791d90d461784790df8a"
+    }
+  },
+  "host": {
+    "repository": "https://github.com/Vhodnoylogin/devbench.git",
+    "commit": "3bb1673f95923f9a8185cf3df0337d775548033d",
+    "version": "1.32.0",
+    "observedDllSha256": "665d71e91390aae754cf1296dd8318d58fafee45da92f2d51cc9488a9658c512"
+  },
+  "compiler": {
+    "architecture": "x64",
+    "observedMSVC": "14.51.36231",
+    "observedWindowsSDK": "10.0.26100"
+  },
+  "rules": [
+    "Keep dependencies, SDK, output DLL/PDB, logs and evidence outside Git.",
+    "Modern SDK build features and source commits must match the external build manifest.",
+    "Building does not install/activate/qualify any provider or authorize a game.",
+    "No old VR runtime layout or renamed foreign static library may substitute for SE."
+  ],
+  "sdkBuildFeatures": {
+    "skyrim_se": true,
+    "skyrim_ae": true,
+    "skyrim_vr": true,
+    "skse_patch_safety": true,
+    "rex_ini": true,
+    "skse_xbyak": true,
+    "rex_json": false,
+    "rex_toml": false
+  },
+  "observedSdkPackages": {
+    "rapidcsv": "v8.92",
+    "spdlog": "v1.16.0",
+    "DirectXTK": "24.2.0",
+    "DirectXMath": "2024.02",
+    "xbyak": "v7.06",
+    "simpleini": "v4.27",
+    "nlohmann_json": "v3.12.0"
+  }
+}
