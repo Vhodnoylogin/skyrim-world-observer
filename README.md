@@ -4,6 +4,8 @@ The separate **0.3.0-se104** variant supports Skyrim SE1.7.104.0 reference and
 node observations using the modern SDK. See [SE build and contract](docs/se104.md).
 It excludes VR picking, actor inventory state, physics and rendered images.
 The original VR0.2.6 target and its dependencies remain separate.
+The exact SE104 build completed a real14-check reference/node and actor-consumer
+qualification; the verified scope and limits are recorded in that document.
 
 The 0.2.6 source candidate adds optional `actorState:true` to reference snapshots:
 actual actor life/restraint/knock state, worn inventory forms and left/right
@@ -17,7 +19,7 @@ depends on the engine inventory size. Fixed-duration passive physics captures
 are described in [physics](docs/physics.md). These additions require separate
 live qualification before replacing any verified installed build.
 
-A read-only Skyrim VR observer for automated tests. One DevBench request copies
+A read-only Skyrim observer with separate VR and exact SE104 targets. One DevBench request copies
 selected reference and skeleton-node state in one SKSE main-thread task. The
 result identifies the session, world-load generation, sample, producing frame,
 phase and units. Missing objects/nodes are explicit unavailable results.
@@ -25,7 +27,7 @@ phase and units. Missing objects/nodes are explicit unavailable results.
 This is an optional automation plugin, not a controller driver or game launcher.
 Mods under test receive ordinary input and require no changes.
 
-## Requirements
+## VR requirements
 
 - Skyrim VR 1.4.15 and SKSEVR 2.0.12; this plugin refuses other game runtimes.
 - DevBench >=1.5.0 for extension registration; tested host baseline is 1.22.0.
@@ -38,7 +40,7 @@ vendored into this repository. Pins and build instructions are in
 [dependencies.json](dependencies.json). Game saves, credentials, logs, traces,
 downloaded sources and DLL/build outputs belong outside Git.
 
-## Build
+## VR build
 
 ```powershell
 python tools/build.py --build-dir D:/Builds/skyrim-world-observer
