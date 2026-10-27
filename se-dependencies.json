@@ -14,6 +14,22 @@
     "commit": "60eb187801956ad277f1cae6680e3a410ee0873b",
     "purpose": "Modern SDK public headers only; no VR driver or process for SE"
   },
+  "providerAPIs": {
+    "IPluginInterface.h": {
+      "repository": "https://github.com/expired6978/SKSE64Plugins",
+      "commit": "9ebcb733e17be695f994cd2e9cc383043446bc02",
+      "url": "https://raw.githubusercontent.com/expired6978/SKSE64Plugins/9ebcb733e17be695f994cd2e9cc383043446bc02/skee64/IPluginInterface.h",
+      "sha256": "875410dd22230f76a014a6841004e7d346f5fa1c748cfff695f9f495234da277"
+    },
+    "OBodyAPI.h": {
+      "repository": "https://github.com/Aietos/OBody-NG",
+      "commit": "13513609145313f721970c2ebe113290f6add6e8",
+      "url": "https://raw.githubusercontent.com/Aietos/OBody-NG/13513609145313f721970c2ebe113290f6add6e8/include/API/API.h",
+      "sha256": "f04945202d9daa6408d7555e46eb2a553a1041ab5d84a8f4efc288168563ea18",
+      "historicalCRLFCheckoutSha256": "42a899e88ba53bcc673d2d8e9513e839f0d661ee1e002514fe3551827a98681d",
+      "lineEndings": "Unmodified LF download; historical CRLF checkout is text-equivalent but not byte-identical"
+    }
+  },
   "DevBenchAPI": {
     "repository": "https://github.com/alandtse/devbench",
     "commit": "32823e465c18a676afc9048ac948aa22a616abd0",

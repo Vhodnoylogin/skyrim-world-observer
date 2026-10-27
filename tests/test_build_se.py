@@ -3,6 +3,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
+import io
 
 SPEC = importlib.util.spec_from_file_location('observer_build_se', Path(__file__).resolve().parents[1]/'tools/build_se.py')
 build = importlib.util.module_from_spec(SPEC)
@@ -10,6 +12,26 @@ SPEC.loader.exec_module(build)
 
 
 class ModernBuildTests(unittest.TestCase):
+    def test_provider_header_acquisition_checks_hash_and_reuses_cache(self):
+        raw=b'public-api'
+        pins={'providerAPIs':{'OBodyAPI.h':{'url':'https://example.invalid/header',
+            'repository':'example','commit':'fixed','sha256':hashlib.sha256(raw).hexdigest()}}}
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t)
+            with mock.patch.object(build.urllib.request,'urlopen',return_value=io.BytesIO(raw)) as fetch:
+                folder, receipt=build.provider_headers(root,pins)
+                self.assertEqual((folder/'OBodyAPI.h').read_bytes(),raw)
+                self.assertEqual(len(receipt),1);fetch.assert_called_once()
+            with mock.patch.object(build.urllib.request,'urlopen',side_effect=AssertionError('unnecessary network')):
+                build.provider_headers(root,pins)
+            (folder/'OBodyAPI.h').write_bytes(b'changed')
+            with mock.patch.object(build.urllib.request,'urlopen',return_value=io.BytesIO(b'wrong')):
+                with self.assertRaises(ValueError):build.provider_headers(root,pins)
+            self.assertEqual((folder/'OBodyAPI.h').read_bytes(),b'changed')
+    def test_provider_header_path_cannot_escape_staging(self):
+        with tempfile.TemporaryDirectory() as t:
+            with self.assertRaises(ValueError):
+                build.provider_headers(Path(t),{'providerAPIs':{'../escape.h':{}}})
     def test_outputs_refuse_any_git_checkout(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t);(root/'.git').mkdir()

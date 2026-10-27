@@ -1,5 +1,8 @@
 #include "SEContract.h"
 #include "DevBenchAPI.h"
+#include "RootObservation.h"
+#include "SkeeObservation.h"
+#include "OBodyObservation.h"
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -19,6 +22,7 @@ std::atomic<std::uint64_t> generation{0}, sample{0};
 std::atomic<int> pending{0};
 std::atomic<bool> loading{true};
 DevBenchAPI::IDevBenchInterface001* api = nullptr;
+observer::RootObservation roots;
 
 bool InitialWorldReadable() {
     const auto ui = RE::UI::GetSingleton();
@@ -37,9 +41,12 @@ json Error(std::string reason, std::string outcome = "rejected") {
             {"error",std::move(reason)},{"outcome",std::move(outcome)}};
 }
 json Capabilities() {
-    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.3.0-se104"},{"sessionId",session},
+    return {{"schemaVersion",1},{"ok",true},{"observerVersion","0.3.1-se104-candidate"},{"sessionId",session},
         {"readOnly",true},{"phase","skse_main_thread_task"},{"runtime","SkyrimSE1.7.104.0"},
-        {"domains",{{"references",true},{"nodes",true},{"actorState",false},{"vrPicking",false},{"physics",false},{"render",false}}},
+        {"domains",{{"references",true},{"nodes",true},{"actors",true},{"skee",true},{"obody",true},
+                    {"actorState",false},{"vrPicking",false},{"physics",false},{"cbpc",false},{"render",false}}},
+        {"skee",observer::skee::ProviderStatus()},{"obody",observer::obody::Capabilities()},
+        {"nativeQualification","new actor/root/SKEE/OBody domains require separate game qualification"},
         {"bounds",{{"refs",16},{"nodes",64},{"requestBytes",16384},{"pendingTasks",4},{"timeoutMs",{100,3000}}}},
         {"producerFrameAvailable",false},{"producerFrameReason","No frame relocation qualified for this SE subset"},
         {"physicsReason","SE subset contains no physics collector"},{"renderReason","No renderer provider"}};
@@ -65,7 +72,33 @@ json Identity(RE::TESObjectREFR* ref, std::uint64_t gen) {
     }
     return out;
 }
-json ReadRef(std::uint32_t id, std::uint64_t gen,bool actorState=false) {
+json RootIdentity(RE::TESObjectREFR* ref, RE::NiAVObject* root, bool firstPerson, std::uint64_t gen) {
+    const auto token = roots.Observe(gen, ref->GetFormID(), ref->GetHandle().native_handle(),
+        firstPerson, reinterpret_cast<std::uintptr_t>(root));
+    return {{"sampledRootToken",root ? json(token) : json(nullptr)}, {"firstPerson",firstPerson},
+        {"identityBasis","sampled_pointer_and_handle_changes_no_object_retention"},
+        {"unobservedAddressReuseDetectable",false}, {"loadedResourcePathsAvailable",false}};
+}
+json ReadActor(RE::TESObjectREFR* ref) {
+    const auto actor = ref->As<RE::Actor>();
+    if (!actor) return {{"status","unavailable"},{"reason","Reference is not an actor"}};
+    const auto base = actor->GetActorBase();
+    if (!base) return {{"status","unavailable"},{"reason","Actor base is unavailable"}};
+    const float raw = base->weight;
+    const bool valid = std::isfinite(raw) && raw >= 0 && raw <= 100;
+    const auto race = actor->GetRace();
+    const auto baseRace = base->GetRace();
+    return {{"status",valid && race && baseRace ? "available" : "unavailable"}, {"baseForm",Hex(base->GetFormID())},
+        {"raceStatus",race && baseRace ? "available" : "unavailable"},
+        {"sex",static_cast<int>(base->GetSex())}, {"race",race ? json(Hex(race->GetFormID())) : json(nullptr)},
+        {"baseRace",baseRace ? json(Hex(baseRace->GetFormID())) : json(nullptr)},
+        {"weight",{{"status",valid ? "available" : "unavailable"},
+            {"rawNPCWeight",std::isfinite(raw) ? json(raw) : json(nullptr)},
+            {"normalizedNPCWeight",valid ? json(double(raw)/100.0) : json(nullptr)},
+            {"basis","TESNPC::weight; normalized is raw/100"},
+            {"renderedMeshInterpolationVerified",false}}}};
+}
+json ReadRef(std::uint32_t id, std::uint64_t gen,bool actorState=false,bool actors=false) {
     const auto ref = Ref(id);
     if (!ref) return {{"form",Hex(id)},{"status","unavailable"},{"reason","Reference not resolved"}};
     json out{{"identity",Identity(ref,gen)},{"status","available"},{"deleted",ref->IsDeleted()},
@@ -77,8 +110,10 @@ json ReadRef(std::uint32_t id, std::uint64_t gen,bool actorState=false) {
     out["cellForm"] = cell ? json(Hex(cell->GetFormID())) : json(nullptr);
     const auto root = ref->Get3D(false);
     out["loaded3D"] = root != nullptr;
+    out["rootIdentity"] = RootIdentity(ref,root,false,gen);
     out["sceneTransform"] = root ? Transform(root->world) : json(nullptr);
     if(actorState) out["actorState"]={{"status","unavailable"},{"reason","SE104 subset does not implement actorState"}};
+    if(actors) out["actor"] = ReadActor(ref);
     if (!observer::Finite(out)) return {{"form",Hex(id)},{"status","unavailable"},{"reason","Non-finite reference transform"}};
     return out;
 }
@@ -88,6 +123,7 @@ json ReadNode(const observer::NodeRequest& request, std::uint64_t gen) {
     if (!ref || ref->IsDeleted()) { out.update({{"status","unavailable"},{"reason","Reference missing or deleted"}}); return out; }
     out["identity"] = Identity(ref,gen);
     const auto root = ref->Get3D(request.firstPerson);
+    out["rootIdentity"] = RootIdentity(ref,root,request.firstPerson,gen);
     if (!root) { out.update({{"status","unavailable"},{"reason","Requested 3D tree not loaded"}}); return out; }
     const auto node = root->GetObjectByName(RE::BSFixedString(request.name));
     if (!node) { out.update({{"status","unavailable"},{"reason","Node not found"}}); return out; }
@@ -97,9 +133,9 @@ json ReadNode(const observer::NodeRequest& request, std::uint64_t gen) {
     if (!observer::Finite(out)) return {{"form",Hex(request.ref)},{"name",request.name},{"status","unavailable"},{"reason","Non-finite node transform"}};
     return out;
 }
-json Snapshot(const observer::Request& request, std::uint64_t gen) {
+json Snapshot(const observer::SERequest& request, std::uint64_t gen, std::int64_t deadline) {
     const auto started = Now();
-    json out{{"schemaVersion",1},{"observerVersion","0.3.0-se104"},{"ok",true},
+    json out{{"schemaVersion",1},{"observerVersion","0.3.1-se104-candidate"},{"ok",true},
         {"sessionId",session},{"loadGeneration",gen},{"sampleId",++sample},
         {"producerFrame",nullptr},{"producerMonotonicNs",started},
         {"phase","skse_main_thread_task"},{"units","skyrim_engine_units"},{"space","world"},
@@ -109,8 +145,37 @@ json Snapshot(const observer::Request& request, std::uint64_t gen) {
         {"render",{{"status","unavailable"},{"reason","No renderer provider"}}}};
     out["vrPicking"]={{"status","unavailable"},{"reason","Flat game target"}};
     bool complete = true;
-    for (auto id : request.refs) { auto value=ReadRef(id,gen,request.actorState); complete &= value["status"]=="available"; out["refs"].push_back(std::move(value)); }
+    for (auto id : request.refs) {
+        auto value=ReadRef(id,gen,request.actorState,request.actors);
+        complete &= value["status"]=="available";
+        if (request.actors && value.contains("actor")) complete &= value["actor"]["status"]=="available";
+        out["refs"].push_back(std::move(value));
+    }
     for (const auto& n : request.nodes) { auto value=ReadNode(n,gen); complete &= value["status"]=="available"; out["nodes"].push_back(std::move(value)); }
+    if (!request.skeeRefs.empty()) {
+        out["skee"] = json::array();
+        for (const auto id : request.skeeRefs) {
+            const auto ref = Ref(id);
+            const auto actor = ref && !ref->IsDeleted() ? ref->As<RE::Actor>() : nullptr;
+            auto value = observer::skee::Observe(actor, request.morphs,
+                [gen,deadline] { return generation.load()==gen && !loading.load() && Now()<deadline; });
+            value["form"] = Hex(id);
+            if (ref) { value["identity"] = Identity(ref,gen); value["rootIdentity"] = RootIdentity(ref,ref->Get3D(false),false,gen); }
+            if (value.value("status",std::string("unavailable")) != "available") complete = false;
+            out["skee"].push_back(std::move(value));
+        }
+    }
+    if (!request.obody.is_null()) {
+        out["obody"] = observer::obody::Snapshot(request.obody,
+            [gen,deadline] { return generation.load()==gen && !loading.load() && Now()<deadline; });
+        if (out["obody"].value("status",std::string("unavailable")) != "available" ||
+            out["obody"].value("quality",std::string("partial")) != "complete") complete = false;
+    }
+    if (request.cbpc) {
+        out["cbpc"] = {{"status","unavailable"},{"reason","CBPC has no qualified provider-owned inventory/contact ABI"},
+            {"inventoryAvailable",false},{"contactAvailable",false},{"negativeContactCoverageAvailable",false}};
+        complete = false;
+    }
     out["quality"] = complete ? "complete" : "partial";
     out["durationUs"] = (Now()-started)/1000;
     return out;
@@ -118,9 +183,9 @@ json Snapshot(const observer::Request& request, std::uint64_t gen) {
 struct Job {
     observer::Gate gate;
     std::promise<json> promise;
-    observer::Request request;
+    observer::SERequest request;
     std::uint64_t gen;
-    Job(observer::Request r, std::uint64_t g) : gate(Now()+std::int64_t(r.timeoutMs)*1000000,g), request(std::move(r)), gen(g) {}
+    Job(observer::SERequest r, std::uint64_t g) : gate(Now()+std::int64_t(r.timeoutMs)*1000000,g), request(std::move(r)), gen(g) {}
 };
 void Handle(void*,const char* text,void* sink,DevBenchAPI::WriteFn write) {
     json result;
@@ -159,6 +224,7 @@ void Handle(void*,const char* text,void* sink,DevBenchAPI::WriteFn write) {
                             }
                             job->gen = ++generation;
                             loading.store(false);
+                            observer::obody::WorldChanged(job->gen,false,"initialWorldObserved");
                             if (api) {
                                 const json event{{"schemaVersion",1},{"sessionId",session},
                                     {"loadGeneration",job->gen},{"loading",false},{"event","initialWorldObserved"},
@@ -166,7 +232,7 @@ void Handle(void*,const char* text,void* sink,DevBenchAPI::WriteFn write) {
                                 api->EmitEvent("world_observer.lifecycle",event.dump().c_str());
                             }
                         }
-                        auto value=Snapshot(job->request,job->gen);
+                        auto value=Snapshot(job->request,job->gen,job->gate.Deadline());
                         if (generation.load()!=job->gen || loading.load()) value=Error("World changed during observation","read_interrupted");
                         else if (Now()>=job->gate.Deadline()) value=Error("Read completed after deadline","read_finished_after_deadline");
                         job->promise.set_value(std::move(value));
@@ -182,7 +248,8 @@ void Handle(void*,const char* text,void* sink,DevBenchAPI::WriteFn write) {
         }
     } catch (const std::exception& e) { result=Error(e.what()); }
     const auto output=observer::SerializeSE(std::move(result));
-    write(sink,output.c_str());
+    if (output.size() > 1024*1024) { const auto error=Error("Observation exceeds 1MiB response bound").dump(); write(sink,error.c_str()); }
+    else write(sink,output.c_str());
 }
 void Connect() {
     api=DevBenchAPI::GetDevBenchInterface001();
@@ -197,7 +264,16 @@ void Connect() {
                 {"required",{"ref","name"}},{"properties",{{"ref",formSchema},{"name",{{"type","string"},{"minLength",1},{"maxLength",128}}},
                     {"firstPerson",{{"type","boolean"}}}}}}}}},
             {"timeoutMs",{{"type","integer"},{"minimum",100},{"maximum",3000}}}}}};
-    const auto& schema=inputSchema;
+    auto schema=inputSchema;
+    schema["properties"]["actors"]={{"type","boolean"}};
+    schema["properties"]["cbpc"]={{"type","boolean"}};
+    schema["properties"]["skee"]={{"type","object"},{"additionalProperties",false},{"required",{"refs","morphs"}},
+        {"properties",{{"refs",{{"type","array"},{"minItems",1},{"maxItems",16},{"items",formSchema}}},
+            {"morphs",{{"type","array"},{"minItems",1},{"maxItems",32},{"items",{{"type","string"},{"minLength",1},{"maxLength",128}}}}}}}};
+    schema["properties"]["obody"]={{"type","object"},{"additionalProperties",false},
+        {"properties",{{"refs",{{"type","array"},{"minItems",1},{"maxItems",16},{"items",formSchema}}},
+            {"afterSequence",{{"type","integer"},{"minimum",0}}},
+            {"maximumEvents",{{"type","integer"},{"minimum",1},{"maximum",256}}}}}};
     const json descriptor{{"description","Read selected world reference/node state in one bounded main-thread task; no game mutation"},
         {"readOnly",true},{"inputSchema",schema},
         {"capabilities",Capabilities()}};
@@ -206,11 +282,15 @@ void Connect() {
 }
 void OnMessage(SKSE::MessagingInterface::Message* m) {
     if (!m) return;
-    if (m->type==SKSE::MessagingInterface::kPostPostLoad) Connect();
+    if (m->type==SKSE::MessagingInterface::kPostLoad || m->type==SKSE::MessagingInterface::kPostPostLoad)
+        observer::skee::NegotiateProvider();
+    if (m->type==SKSE::MessagingInterface::kPostPostLoad) { observer::obody::Initialize(); Connect(); }
     if (m->type==SKSE::MessagingInterface::kPreLoadGame || m->type==SKSE::MessagingInterface::kNewGame) { ++generation; loading.store(true); }
     // SKSE's load result is encoded in the pointer value, not a pointed-to bool.
     if (m->type==SKSE::MessagingInterface::kPostLoadGame) loading.store(m->data==nullptr);
     if (m->type==SKSE::MessagingInterface::kNewGame) loading.store(false);
+    if (m->type==SKSE::MessagingInterface::kPreLoadGame || m->type==SKSE::MessagingInterface::kPostLoadGame || m->type==SKSE::MessagingInterface::kNewGame)
+        observer::obody::WorldChanged(generation.load(),loading.load(),std::to_string(m->type));
     if (api && (m->type==SKSE::MessagingInterface::kPreLoadGame || m->type==SKSE::MessagingInterface::kPostLoadGame || m->type==SKSE::MessagingInterface::kNewGame)) {
         json event{{"schemaVersion",1},{"sessionId",session},{"loadGeneration",generation.load()},
             {"loading",loading.load()},{"skseMessage",m->type},{"producerMonotonicNs",Now()}};
@@ -221,7 +301,7 @@ void OnMessage(SKSE::MessagingInterface::Message* m) {
 }
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData value{};
-    value.PluginVersion({0,3,0,0});
+    value.PluginVersion({0,3,1,0});
     value.PluginName("SkyrimWorldObserver");
     value.AuthorName("Vhodnoylogin");
     value.UsesAddressLibrary();
@@ -232,7 +312,7 @@ extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Ve
 }();
 extern "C" __declspec(dllexport) bool SKSEPlugin_Query(const SKSE::QueryInterface* skse,SKSE::PluginInfo* info) {
     if (!skse || !info) return false;
-    info->infoVersion=SKSE::PluginInfo::kVersion; info->name="SkyrimWorldObserver"; info->version=0x00030000;
+    info->infoVersion=SKSE::PluginInfo::kVersion; info->name="SkyrimWorldObserver"; info->version=0x00030100;
     return !skse->IsEditor() && skse->RuntimeVersion()==SKSE::RUNTIME_SSE_1_7_104;
 }
 extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface* skse) {
@@ -245,6 +325,6 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
     }
     auto messaging=SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(OnMessage)) return false;
-    spdlog::info("World observer 0.3.0-se104 loaded, session {}",session);
+    spdlog::info("World observer 0.3.1-se104-candidate loaded, session {}",session);
     return true;
 }

@@ -33,6 +33,24 @@ def pinned_file(pin):
     return path
 
 
+def provider_headers(build, pins):
+    folder = build/'external/provider-api'
+    folder.mkdir(parents=True, exist_ok=True)
+    result = []
+    for name, pin in pins['providerAPIs'].items():
+        if Path(name).name != name or name not in ('IPluginInterface.h', 'OBodyAPI.h'):
+            raise ValueError('Unexpected provider API header name')
+        target = folder/name
+        if not target.is_file() or digest(target) != pin['sha256']:
+            with urllib.request.urlopen(pin['url'], timeout=30) as response:
+                raw = response.read(1024*1024+1)
+            if len(raw) > 1024*1024 or hashlib.sha256(raw).hexdigest() != pin['sha256']:
+                raise ValueError('Pinned provider ABI download differs: '+name)
+            target.write_bytes(raw)
+        result.append({'path': str(target), 'sha256': pin['sha256'], 'repository': pin['repository'], 'commit': pin['commit']})
+    return folder, result
+
+
 def header_inventory(directories):
     """Pin all public/header-only dependency inputs, including generated headers."""
     found = {}
@@ -89,6 +107,7 @@ def main():
     library, links, headers = verify_sdk(sdk, pins)
     build = args.build_dir
     build.mkdir(parents=True, exist_ok=True)
+    provider_dir, provider_pins = provider_headers(build, pins)
     api_dir = build/'external/devbench-api'
     api_dir.mkdir(parents=True, exist_ok=True)
     api_pins = []
@@ -113,7 +132,7 @@ def main():
                '-DOBSERVER_SE_SDK_LIBRARY='+str(library),
                '-DOBSERVER_SE_INCLUDE_DIRS='+';'.join(str(Path(p).resolve()) for p in sdk['includeDirs']),
                '-DOBSERVER_SE_LINK_LIBRARIES='+';'.join(str(p) for p in links),
-               '-DDEVBENCH_API_DIR='+str(api_dir)]
+               '-DDEVBENCH_API_DIR='+str(api_dir), '-DOBSERVER_PROVIDER_API_DIR='+str(provider_dir)]
     subprocess.run(command, check=True)
     subprocess.run([cmake, '--build', str(build), '--config', 'Release', '--parallel', '4'], check=True)
     ctest = str(Path(cmake).with_name('ctest.exe'))
@@ -121,7 +140,7 @@ def main():
     _, _, final_headers = verify_sdk(sdk, pins)
     if final_headers != headers or digest(manifest_path) != sdk_sha:
         raise ValueError('External SDK changed during compilation')
-    for pin in source_files + api_pins:
+    for pin in source_files + api_pins + provider_pins:
         pinned_file(pin)
     artifacts = []
     for suffix in ('.dll', '.pdb'):
@@ -133,7 +152,7 @@ def main():
                'nativeQualified': False, 'installed': False, 'gameStarted': False,
                'sdkManifest': {'path': str(manifest_path), 'sha256': sdk_sha},
                'sourceFiles': source_files, 'sdkHeaders': headers, 'sdkLibrary': sdk['library'],
-               'linkLibraries': sdk['linkLibraries'], 'devbenchApi': api_pins,
+               'linkLibraries': sdk['linkLibraries'], 'devbenchApi': api_pins, 'providerAPIs': provider_pins,
                'artifacts': artifacts, 'configureCommand': command}
     (build/'manifest.json').write_bytes((json.dumps(receipt, indent=2)+'\n').encode())
     print(json.dumps({'manifest': str(build/'manifest.json'), 'artifacts': artifacts,

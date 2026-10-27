@@ -1,5 +1,13 @@
 # Skyrim World Observer
 
+The **0.3.1-se104 source candidate** adds direct read-only SKEE aggregates,
+zero-preserving morph presence/key observations, bounded OBody native callback
+receipts and assignment reads, plus sampled NPC sex/race/weight and 3D-root
+identity. These new domains are **not game-qualified**. See
+[SE observations](docs/se-observations.md), [SKEE](docs/skee-observation.md),
+[OBody](docs/obody-observation.md) and [CBPC limitations](docs/cbpc-observation.md).
+It is not a replacement for the earlier exact build's retained qualification.
+
 The separate **0.3.0-se104** variant supports Skyrim SE1.7.104.0 reference and
 node observations using the modern SDK. See [SE build and contract](docs/se104.md).
 It excludes VR picking, actor inventory state, physics and rendered images.
